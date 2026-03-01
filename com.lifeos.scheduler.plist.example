@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.lifeos.scheduler</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/YOUR_USERNAME/.openclaw/workspace/life-os/.venv/bin/python3</string>
+        <string>/Users/YOUR_USERNAME/.openclaw/workspace/life-os/scheduler.py</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/Users/YOUR_USERNAME/.openclaw/workspace/life-os</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/YOUR_USERNAME/.openclaw/workspace/life-os/scheduler.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/YOUR_USERNAME/.openclaw/workspace/life-os/scheduler.log</string>
+</dict>
+</plist>

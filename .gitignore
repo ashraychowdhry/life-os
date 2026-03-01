@@ -5,3 +5,5 @@ __pycache__/
 .whoop_token.json
 scheduler.log
 *.egg-info/
+notifications/queue.json
+*.log
