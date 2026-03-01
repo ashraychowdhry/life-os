@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import re
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -106,6 +106,66 @@ TAG_KEYWORDS = {
     "pre_workout": ["pre-workout", "before workout", "before gym"],
     "post_workout": ["after workout", "after gym", "post workout"],
 }
+
+TIME_PATTERNS = [
+    # Specific times: "at 3pm", "at 14:30", "around 9am"
+    (r'\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b', "specific"),
+    (r'\baround\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b', "specific"),
+    # Named times
+    (r'\bnoon\b', "noon"),
+    (r'\bmidnight\b', "midnight"),
+    (r'\bthis morning\b', "morning"),
+    (r'\bthis evening\b', "evening"),
+    (r'\btonight\b', "evening"),
+    (r'\blast night\b', "last_night"),
+    (r'\bearlier today\b', "earlier"),
+    (r'\bjust now\b', "now"),
+    (r'\bjust\b', "now"),
+]
+
+USER_TZ = "America/Los_Angeles"
+
+def parse_time_reference(text: str, now: datetime) -> datetime:
+    """
+    Extract a time reference from text and return the correct datetime.
+    All named times (noon, morning, etc.) are interpreted in the user's local timezone.
+    Defaults to now if no time reference found.
+    """
+    import zoneinfo
+    lower = text.lower()
+    local_tz = zoneinfo.ZoneInfo(USER_TZ)
+    now_local = now.astimezone(local_tz)
+
+    def local_at(hour, minute=0) -> datetime:
+        return now_local.replace(hour=hour, minute=minute, second=0, microsecond=0).astimezone(timezone.utc)
+
+    # Specific time: "at 3pm", "at 14:30"
+    m = re.search(r'\b(?:at|around)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b', lower)
+    if m:
+        hour = int(m.group(1))
+        minute = int(m.group(2)) if m.group(2) else 0
+        meridiem = m.group(3)
+        if meridiem == "pm" and hour != 12:
+            hour += 12
+        elif meridiem == "am" and hour == 12:
+            hour = 0
+        return local_at(hour, minute)
+
+    if re.search(r'\bnoon\b', lower):
+        return local_at(12, 0)
+    if re.search(r'\bmidnight\b', lower):
+        return local_at(0, 0)
+    if re.search(r'\bthis morning\b', lower):
+        return local_at(8, 0)
+    if re.search(r'\b(this evening|tonight)\b', lower):
+        return local_at(19, 0)
+    if re.search(r'\blast night\b', lower):
+        yesterday_local = now_local - timedelta(days=1)
+        return yesterday_local.replace(hour=22, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    if re.search(r'\bearlier\b', lower):
+        return now - timedelta(hours=2)
+
+    return now  # default: right now
 
 QUANTITY_PATTERNS = [
     (r'\b(a|an|one)\b', 1.0),
@@ -194,8 +254,9 @@ def log_event(text: str, source: str = "whatsapp",
     """
     Parse and store a life log event. Returns the stored record.
     """
+    now = datetime.now(timezone.utc)
     if occurred_at is None:
-        occurred_at = datetime.now(timezone.utc)
+        occurred_at = parse_time_reference(text, now)
 
     parsed = parse_event(text)
     engine = init_db(config.DATABASE_URL)
