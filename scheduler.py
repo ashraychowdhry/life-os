@@ -65,7 +65,7 @@ def run_all():
 
 
 if __name__ == "__main__":
-    scheduler = BlockingScheduler(timezone="America/Los_Angeles")
+    scheduler = BlockingScheduler(timezone="America/New_York")
 
     # 8 AM: ingest + send morning summary
     scheduler.add_job(run_morning, CronTrigger(hour=8, minute=0), id="morning")

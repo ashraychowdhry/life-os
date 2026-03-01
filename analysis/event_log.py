@@ -123,7 +123,7 @@ TIME_PATTERNS = [
     (r'\bjust\b', "now"),
 ]
 
-USER_TZ = "America/Los_Angeles"
+USER_TZ = "America/New_York"
 
 def parse_time_reference(text: str, now: datetime) -> datetime:
     """
