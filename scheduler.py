@@ -73,6 +73,13 @@ if __name__ == "__main__":
     # Noon: ingest only (catch morning workouts, rescored data)
     scheduler.add_job(run_all, CronTrigger(hour=12, minute=0), id="midday_ingestion")
 
+    # Sunday 9 AM: weekly insights report
+    scheduler.add_job(
+        lambda: __import__('analysis.insights', fromlist=['run']).run(),
+        CronTrigger(day_of_week="sun", hour=9, minute=0),
+        id="weekly_insights"
+    )
+
     log.info("⚡ Life OS Scheduler started. Running ingestion at 8 AM and 12 PM PT daily.")
     log.info("   Press Ctrl+C to stop.")
 
