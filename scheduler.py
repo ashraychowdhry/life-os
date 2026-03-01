@@ -46,6 +46,19 @@ def run_oura():
         log.error(f"❌ Oura ingestion failed: {e}", exc_info=True)
 
 
+def run_morning():
+    """8 AM: ingest overnight data then send summary."""
+    run_whoop()
+    run_oura()
+    log.info("▶ Sending morning summary...")
+    try:
+        from analysis.morning_summary import run as send_summary
+        send_summary()
+        log.info("✅ Morning summary sent")
+    except Exception as e:
+        log.error(f"❌ Morning summary failed: {e}", exc_info=True)
+
+
 def run_all():
     run_whoop()
     run_oura()
@@ -54,10 +67,10 @@ def run_all():
 if __name__ == "__main__":
     scheduler = BlockingScheduler(timezone="America/Los_Angeles")
 
-    # Run every day at 8 AM — data is usually synced from overnight by then
-    scheduler.add_job(run_all, CronTrigger(hour=8, minute=0), id="daily_ingestion")
+    # 8 AM: ingest + send morning summary
+    scheduler.add_job(run_morning, CronTrigger(hour=8, minute=0), id="morning")
 
-    # Also run at noon to catch any workouts logged in the morning
+    # Noon: ingest only (catch morning workouts, rescored data)
     scheduler.add_job(run_all, CronTrigger(hour=12, minute=0), id="midday_ingestion")
 
     log.info("⚡ Life OS Scheduler started. Running ingestion at 8 AM and 12 PM PT daily.")

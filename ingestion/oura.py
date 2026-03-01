@@ -1,7 +1,16 @@
 """
 Oura data ingestion pipeline.
-Pulls sleep, readiness, activity, and workouts from the Oura v2 API
-and upserts into Postgres.
+Pulls from Oura v2 API and upserts into Postgres.
+
+Two sleep endpoints:
+  - /daily_sleep    → scores + contributors (aggregated per day)
+  - /sleep          → individual sleep periods with HRV, RHR, respiratory rate
+                      We store the primary "long_sleep" period per night for biometrics,
+                      and merge with daily_sleep scores.
+
+Run manually:
+  python ingestion/oura.py [start_date] [end_date]  (YYYY-MM-DD)
+  Defaults to last 30 days if no args given.
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -33,33 +42,76 @@ def fetch_range(client: httpx.Client, endpoint: str, start_date: str, end_date: 
 
 
 def ingest_sleep(client: httpx.Client, session: Session, start_date: str, end_date: str):
-    records = fetch_range(client, "/daily_sleep", start_date, end_date)
-    print(f"  Oura sleep: {len(records)} records")
-    for r in records:
-        contributors = r.get("contributors", {})
+    """
+    Merge /daily_sleep (scores/contributors) with /sleep (biometrics).
+
+    /daily_sleep gives us: score, efficiency sub-scores, contributors
+    /sleep gives us: HRV, RHR, respiratory rate, exact stage durations
+
+    Strategy: for each day, find the primary sleep period (type="long_sleep",
+    or fallback to whichever has the longest duration). Merge both sources
+    into OuraSleep row, upserted by the daily_sleep ID.
+    """
+    daily = fetch_range(client, "/daily_sleep", start_date, end_date)
+    periods = fetch_range(client, "/sleep", start_date, end_date)
+
+    # Index sleep periods by day → pick the primary one (long_sleep > others, then by duration)
+    def period_priority(p):
+        type_rank = {"long_sleep": 0, "sleep": 1, "late_nap": 2, "rest": 3}
+        return (type_rank.get(p.get("type", "sleep"), 9), -(p.get("total_sleep_duration") or 0))
+
+    periods_by_day: dict[str, dict] = {}
+    for p in periods:
+        day = p["day"]
+        if day not in periods_by_day or period_priority(p) < period_priority(periods_by_day[day]):
+            periods_by_day[day] = p
+
+    print(f"  Oura sleep: {len(daily)} daily records, {len(periods)} sleep periods")
+
+    for r in daily:
+        day = r["day"]
+        contributors = r.get("contributors") or {}
+        primary = periods_by_day.get(day, {})
+
         stmt = pg_insert(OuraSleep).values(
             id=r["id"],
-            day=r["day"],
-            bedtime_start=r.get("bedtime_start"),
-            bedtime_end=r.get("bedtime_end"),
-            total_sleep_duration=r.get("total_sleep_duration"),
-            awake_time=r.get("awake_time"),
-            light_sleep_duration=r.get("light_sleep_duration"),
-            deep_sleep_duration=r.get("deep_sleep_duration"),
-            rem_sleep_duration=r.get("rem_sleep_duration"),
-            time_in_bed=r.get("time_in_bed"),
+            day=day,
+            bedtime_start=primary.get("bedtime_start"),
+            bedtime_end=primary.get("bedtime_end"),
+            total_sleep_duration=primary.get("total_sleep_duration") or r.get("total_sleep_duration"),
+            awake_time=primary.get("awake_time"),
+            light_sleep_duration=primary.get("light_sleep_duration"),
+            deep_sleep_duration=primary.get("deep_sleep_duration"),
+            rem_sleep_duration=primary.get("rem_sleep_duration"),
+            time_in_bed=primary.get("time_in_bed"),
             score=r.get("score"),
             efficiency=contributors.get("efficiency"),
             latency=contributors.get("latency"),
             restfulness=contributors.get("restfulness"),
-            average_hrv=r.get("average_hrv"),
-            lowest_heart_rate=r.get("lowest_heart_rate"),
-            average_heart_rate=r.get("average_heart_rate"),
-            average_breath=r.get("average_breath"),
+            # Biometrics from /sleep periods
+            average_hrv=primary.get("average_hrv"),
+            lowest_heart_rate=primary.get("lowest_heart_rate"),
+            average_heart_rate=primary.get("average_heart_rate") or None,
+            average_breath=primary.get("average_breath"),
             contributors=contributors,
         ).on_conflict_do_update(
             index_elements=["id"],
-            set_={"score": r.get("score"), "contributors": contributors}
+            set_={
+                "score": r.get("score"),
+                "contributors": contributors,
+                "average_hrv": primary.get("average_hrv"),
+                "lowest_heart_rate": primary.get("lowest_heart_rate"),
+                "average_heart_rate": primary.get("average_heart_rate") or None,
+                "average_breath": primary.get("average_breath"),
+                "bedtime_start": primary.get("bedtime_start"),
+                "bedtime_end": primary.get("bedtime_end"),
+                "total_sleep_duration": primary.get("total_sleep_duration") or r.get("total_sleep_duration"),
+                "awake_time": primary.get("awake_time"),
+                "light_sleep_duration": primary.get("light_sleep_duration"),
+                "deep_sleep_duration": primary.get("deep_sleep_duration"),
+                "rem_sleep_duration": primary.get("rem_sleep_duration"),
+                "time_in_bed": primary.get("time_in_bed"),
+            }
         )
         session.execute(stmt)
     session.commit()
@@ -69,7 +121,7 @@ def ingest_readiness(client: httpx.Client, session: Session, start_date: str, en
     records = fetch_range(client, "/daily_readiness", start_date, end_date)
     print(f"  Oura readiness: {len(records)} records")
     for r in records:
-        contributors = r.get("contributors", {})
+        contributors = r.get("contributors") or {}
         stmt = pg_insert(OuraReadiness).values(
             id=r["id"],
             day=r["day"],
@@ -79,7 +131,8 @@ def ingest_readiness(client: httpx.Client, session: Session, start_date: str, en
             contributors=contributors,
         ).on_conflict_do_update(
             index_elements=["id"],
-            set_={"score": r.get("score"), "contributors": contributors}
+            set_={"score": r.get("score"), "contributors": contributors,
+                  "temperature_deviation": r.get("temperature_deviation")}
         )
         session.execute(stmt)
     session.commit()
@@ -89,7 +142,7 @@ def ingest_activity(client: httpx.Client, session: Session, start_date: str, end
     records = fetch_range(client, "/daily_activity", start_date, end_date)
     print(f"  Oura activity: {len(records)} records")
     for r in records:
-        contributors = r.get("contributors", {})
+        contributors = r.get("contributors") or {}
         stmt = pg_insert(OuraActivity).values(
             id=r["id"],
             day=r["day"],
@@ -106,7 +159,8 @@ def ingest_activity(client: httpx.Client, session: Session, start_date: str, end
             contributors=contributors,
         ).on_conflict_do_update(
             index_elements=["id"],
-            set_={"score": r.get("score"), "steps": r.get("steps")}
+            set_={"score": r.get("score"), "steps": r.get("steps"),
+                  "active_calories": r.get("active_calories")}
         )
         session.execute(stmt)
     session.commit()
@@ -136,27 +190,41 @@ def ingest_workouts(client: httpx.Client, session: Session, start_date: str, end
     session.commit()
 
 
-def run(start_date: Optional[str] = None, end_date: Optional[str] = None):
-    today = date.today().isoformat()
-    if not end_date:
-        end_date = today
-    if not start_date:
-        # Default: last 30 days
-        start_date = (date.today() - timedelta(days=30)).isoformat()
+def run(start_date: Optional[str] = None, end_date: Optional[str] = None,
+        chunk_days: int = 90):
+    """
+    Run full ingestion. Chunks requests into 90-day windows to avoid
+    Oura API timeouts on large date ranges.
+    """
+    today = date.today()
+    end = date.fromisoformat(end_date) if end_date else today
+    start = date.fromisoformat(start_date) if start_date else today - timedelta(days=30)
 
     engine = init_db(config.DATABASE_URL)
+
+    # Chunk into 90-day windows
+    chunks = []
+    cursor = start
+    while cursor <= end:
+        chunk_end = min(cursor + timedelta(days=chunk_days - 1), end)
+        chunks.append((cursor.isoformat(), chunk_end.isoformat()))
+        cursor = chunk_end + timedelta(days=1)
+
+    print(f"Ingesting Oura data ({start} → {end}) in {len(chunks)} chunk(s)...")
+
     with Session(engine) as session:
         client = get_client()
-        print(f"Ingesting Oura data ({start_date} → {end_date})...")
-        ingest_sleep(client, session, start_date, end_date)
-        ingest_readiness(client, session, start_date, end_date)
-        ingest_activity(client, session, start_date, end_date)
-        ingest_workouts(client, session, start_date, end_date)
-    print("✅ Oura ingestion complete.")
+        for i, (s, e) in enumerate(chunks, 1):
+            print(f"\n  Chunk {i}/{len(chunks)}: {s} → {e}")
+            ingest_sleep(client, session, s, e)
+            ingest_readiness(client, session, s, e)
+            ingest_activity(client, session, s, e)
+            ingest_workouts(client, session, s, e)
+
+    print("\n✅ Oura ingestion complete.")
 
 
 if __name__ == "__main__":
-    # Usage: python oura.py [start_date] [end_date]  (YYYY-MM-DD)
     start = sys.argv[1] if len(sys.argv) > 1 else None
     end = sys.argv[2] if len(sys.argv) > 2 else None
     run(start, end)
