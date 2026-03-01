@@ -4,5 +4,11 @@
     "message": "\u2600\ufe0f *Good morning, Ashray*\n\n\ud83d\udfe1 *Recovery*\n  Whoop: 65/100\n  Oura readiness: 79/100\n\n\ud83c\udf19 *Sleep*\n  Whoop: 6.4h total (SWS 1.9h \u00b7 REM 1.7h) \u00b7 perf 82%\n  Oura: 6.4h total (deep 1.5h \u00b7 REM 1.9h) \u00b7 score 72\n\n\u2764\ufe0f *Vitals*\n  HRV: 59.4ms (Whoop) \u00b7 57.0ms (Oura)\n  RHR: 55bpm (Whoop) \u00b7 48bpm (Oura)\n  SpO2: 95.0%\n  Temp deviation: -0.04\u00b0C\n\n\ud83d\udcaa *Today's training*\n  Moderate day \u2014 stick to zone 2 or skill work.",
     "created_at": "2026-03-01T01:30:25.925601+00:00",
     "delivered": true
+  },
+  {
+    "id": "e1caf5a7-88e4-4b71-9d8a-e72a3168bad6",
+    "message": "\u2600\ufe0f *Good morning, Ashray*\n\n\ud83d\udfe1 *Recovery*\n  Whoop: 65/100\n  Oura readiness: 79/100\n\n\ud83c\udf19 *Sleep*\n  Whoop: 6.4h total (SWS 1.9h \u00b7 REM 1.7h) \u00b7 perf 82%\n  Oura: 6.4h total (deep 1.5h \u00b7 REM 1.9h) \u00b7 score 72\n\n\u2764\ufe0f *Vitals*\n  HRV: 59.4ms (Whoop) \u00b7 57.0ms (Oura)\n  RHR: 55bpm (Whoop) \u00b7 48bpm (Oura)\n  SpO2: 95.0%\n  Temp deviation: -0.04\u00b0C\n\n\ud83d\udcaa *Today's training*\n  Moderate day \u2014 stick to zone 2 or skill work.",
+    "created_at": "2026-03-01T01:34:37.731690+00:00",
+    "delivered": true
   }
 ]

@@ -16,8 +16,8 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-# WhatsApp target — matches the allowFrom entry in OpenClaw config (+6099379394, not +16099379394)
-WHATSAPP_TARGET = "+6099379394"
+WHATSAPP_TARGET = "+16099379394"
+TELEGRAM_CHAT_ID = "184558135"
 
 QUEUE_FILE = os.path.join(os.path.dirname(__file__), "queue.json")
 
