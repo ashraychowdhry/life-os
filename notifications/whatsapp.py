@@ -1,56 +1,62 @@
 """
-Notifications — sends messages to Ashray via WhatsApp through OpenClaw.
+Notifications — queues messages for Zoe (the OpenClaw agent) to deliver via WhatsApp.
 
-OpenClaw manages the WhatsApp connection. We shell out to the
-`openclaw message send` CLI — no WhatsApp protocol handling needed.
+Architecture:
+  The Python scheduler cannot call WhatsApp directly (OpenClaw's message tool
+  is blocked over HTTP for security). Instead, we write notifications to a
+  queue file. Zoe checks this file on heartbeat and delivers them.
 
-The target is Ashray's own number (self-chat), since selfChatMode is enabled
-in the OpenClaw WhatsApp config.
+  Queue file: /Users/redtriangle/.openclaw/workspace/life-os/notifications/queue.json
 
-Usage (from other modules):
-  from notifications.whatsapp import send, send_health_alert
-  send("Your Whoop recovery is 34 — take it easy today.")
+Queue format:
+  [{"id": "...", "message": "...", "created_at": "...", "delivered": false}, ...]
 """
-import subprocess
-import sys
+import json
+import os
+import uuid
+from datetime import datetime, timezone
 
-# Ashray's WhatsApp number (E.164 format)
-# selfChatMode=true means OpenClaw will deliver this to your own chat
-ASHRAY_WHATSAPP = "+16099379394"
+# WhatsApp target — matches the allowFrom entry in OpenClaw config (+6099379394, not +16099379394)
+WHATSAPP_TARGET = "+6099379394"
+
+QUEUE_FILE = os.path.join(os.path.dirname(__file__), "queue.json")
 
 
-def send(message: str, dry_run: bool = False) -> bool:
+def _load_queue() -> list:
+    if not os.path.exists(QUEUE_FILE):
+        return []
+    with open(QUEUE_FILE) as f:
+        return json.load(f)
+
+
+def _save_queue(queue: list):
+    with open(QUEUE_FILE, "w") as f:
+        json.dump(queue, f, indent=2)
+
+
+def send(message: str) -> str:
     """
-    Send a WhatsApp message via OpenClaw CLI.
-    Returns True on success, False on failure.
+    Queue a WhatsApp message for delivery by Zoe on next heartbeat.
+    Returns the message id.
     """
-    cmd = [
-        "openclaw", "message", "send",
-        "--channel", "whatsapp",
-        "--target", ASHRAY_WHATSAPP,
-        "--message", message,
-    ]
-    if dry_run:
-        cmd.append("--dry-run")
-
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-        if result.returncode != 0:
-            print(f"[notifications] send failed (exit {result.returncode}): {result.stderr.strip()}", file=sys.stderr)
-            return False
-        return True
-    except Exception as e:
-        print(f"[notifications] send error: {e}", file=sys.stderr)
-        return False
+    queue = _load_queue()
+    entry = {
+        "id": str(uuid.uuid4()),
+        "message": message,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "delivered": False,
+    }
+    queue.append(entry)
+    _save_queue(queue)
+    print(f"[notifications] queued message {entry['id']}")
+    return entry["id"]
 
 
-def send_health_alert(title: str, body: str) -> bool:
-    """Formatted health alert."""
+def send_health_alert(title: str, body: str) -> str:
     return send(f"⚡ *{title}*\n\n{body}")
 
 
-def send_daily_summary(recovery: int, readiness: int, hrv: float, notes: str = "") -> bool:
-    """Daily morning health summary."""
+def send_daily_summary(recovery: int, readiness: int, hrv: float, notes: str = "") -> str:
     emoji = "🟢" if recovery >= 67 else "🟡" if recovery >= 34 else "🔴"
     msg = (
         f"{emoji} *Morning Summary*\n\n"
@@ -63,6 +69,31 @@ def send_daily_summary(recovery: int, readiness: int, hrv: float, notes: str = "
     return send(msg)
 
 
+def get_pending() -> list:
+    """Return all undelivered messages."""
+    return [m for m in _load_queue() if not m["delivered"]]
+
+
+def mark_delivered(message_id: str):
+    """Mark a message as delivered."""
+    queue = _load_queue()
+    for m in queue:
+        if m["id"] == message_id:
+            m["delivered"] = True
+    _save_queue(queue)
+
+
 if __name__ == "__main__":
-    # Quick test
-    send("⚡ Life OS notifications are wired up.", dry_run="--dry-run" in sys.argv)
+    import sys
+    if "--check" in sys.argv:
+        pending = get_pending()
+        if not pending:
+            print("NO_PENDING")
+        else:
+            for m in pending:
+                print(f"PENDING:{m['id']}:{m['message']}")
+    elif "--queue" in sys.argv:
+        # Quick test: queue a message from CLI
+        msg = " ".join(sys.argv[2:]) or "test"
+        send(msg)
+        print(f"Queued: {msg}")
