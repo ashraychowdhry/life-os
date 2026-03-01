@@ -168,6 +168,30 @@ class OuraWorkout(Base):
     ingested_at = Column(DateTime(timezone=True), default=datetime.utcnow)
 
 
+class Event(Base):
+    """
+    Personal event log — Ashray's self-reported behaviors.
+    Examples: "drank a coffee", "played tennis", "had 2 beers"
+    
+    Tags are extracted from raw_text and stored as a JSONB array.
+    Category is a top-level grouping (caffeine, alcohol, exercise, food, etc.)
+    Quantity and unit are parsed when present ("2 beers", "a double espresso").
+    """
+    __tablename__ = "events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    occurred_at = Column(DateTime(timezone=True), nullable=False)  # when it happened
+    logged_at = Column(DateTime(timezone=True), default=datetime.utcnow)  # when logged
+    raw_text = Column(Text, nullable=False)          # original message
+    category = Column(String(50))                    # caffeine / alcohol / exercise / food / sleep / other
+    tags = Column(JSONB, default=list)               # ["coffee", "caffeine", "morning"]
+    quantity = Column(Float)                         # 1.0, 2.0, 0.5
+    unit = Column(String(30))                        # "cup", "drink", "hour", "km"
+    notes = Column(Text)                             # any extra parsed context
+    source = Column(String(20), default="whatsapp")  # whatsapp / telegram / manual
+    ingested_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
 def init_db(database_url: str):
     engine = create_engine(database_url)
     Base.metadata.create_all(engine)
